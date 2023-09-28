@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -12,8 +13,9 @@ import (
 )
 
 type Handler struct {
-	Upstreams []string
-	Transport http.RoundTripper
+	Upstreams     []string
+	Transport     http.RoundTripper
+	LoadBalancing LoadBalancer
 }
 
 type HandlerResponse struct {
@@ -131,9 +133,12 @@ func (h *Handler) prepareRequest(r *http.Request) (*http.Request, error) {
 }
 
 func (h *Handler) proxy(r *http.Request, or *http.Request, w http.ResponseWriter) error {
-	resp, _ := h.RoundTrip(r)
-	defer resp.Body.Close()
-	fmt.Println(resp.StatusCode)
+
+	upstream := h.LoadBalancing.Select(h.Upstreams)
+	if upstream == "" {
+		return errors.New("proxy error")
+	}
+
 	return nil
 }
 
@@ -152,13 +157,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	addr      string
-	upstreams string
+	addr          string
+	upstreams     string
+	balancePolicy string
 )
 
 func init() {
 	flag.StringVar(&addr, "addr", ":80", "")
 	flag.StringVar(&upstreams, "upstreams", "", "")
+	flag.StringVar(&balancePolicy, "balance-policy", "random", "load balance policy")
 }
 
 func main() {
@@ -170,6 +177,13 @@ func main() {
 	handler := &Handler{
 		Upstreams: strings.Split(upstreams, " "),
 		Transport: http.DefaultTransport,
+	}
+
+	switch balancePolicy {
+	case "random":
+		handler.LoadBalancing = &RandomSelector{}
+	case "robin":
+		handler.LoadBalancing = &RoundRobinSelector{}
 	}
 
 	log.Println(http.ListenAndServe(addr, handler))
