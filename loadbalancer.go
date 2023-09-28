@@ -11,6 +11,10 @@ type LoadBalancer interface {
 
 type RandomSelector struct{}
 
+func NewRandomSelector() LoadBalancer {
+	return &RandomSelector{}
+}
+
 func (s *RandomSelector) Select(hosts []string) string {
 	var randHost string
 	count := 0
@@ -25,6 +29,10 @@ func (s *RandomSelector) Select(hosts []string) string {
 
 type RoundRobinSelector struct {
 	robin uint32
+}
+
+func NewRoundRobinSelector() LoadBalancer {
+	return &RoundRobinSelector{}
 }
 
 func (s *RoundRobinSelector) Select(hosts []string) string {
