@@ -12,8 +12,12 @@ import (
 	"strings"
 )
 
+type Upstream struct {
+	host string
+}
+
 type Handler struct {
-	Upstreams     []string
+	Upstreams     []*Upstream
 	Transport     http.RoundTripper
 	LoadBalancing LoadBalancer
 }
@@ -22,6 +26,24 @@ type HandlerResponse struct {
 	StatusCode int    `json:"status_code"`
 	Data       any    `json:"data"`
 	Message    string `json:"message"`
+}
+
+type CallInfo struct {
+	Upstream   *Upstream
+	Host, Port string
+}
+
+func (u *Upstream) fillCallInfo(r *http.Request) (CallInfo, error) {
+	host, port, err := net.SplitHostPort(u.host)
+	if err != nil {
+		return CallInfo{}, err
+	}
+
+	return CallInfo{
+		Upstream: u,
+		Host:     host,
+		Port:     port,
+	}, nil
 }
 
 func Response(w http.ResponseWriter, statusCode int, data any, msg string) {
@@ -132,12 +154,37 @@ func (h *Handler) prepareRequest(r *http.Request) (*http.Request, error) {
 	return r, nil
 }
 
+func (h *Handler) directRequest(r *http.Request, info CallInfo) {
+	r.URL.Host = info.Host
+}
+
+func (h *Handler) reverseProxy(r *http.Request, callInfo CallInfo) error {
+	h.directRequest(r, callInfo)
+
+	resp, err := h.Transport.RoundTrip(r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	fmt.Println(resp.StatusCode)
+
+	return nil
+}
+
 func (h *Handler) proxy(r *http.Request, or *http.Request, w http.ResponseWriter) error {
 
 	upstream := h.LoadBalancing.Select(h.Upstreams)
-	if upstream == "" {
+	if upstream == nil {
 		return errors.New("proxy error")
 	}
+
+	callInfo, err := upstream.fillCallInfo(r)
+	if err != nil {
+		return err
+	}
+
+	h.reverseProxy(r, callInfo)
 
 	return nil
 }
@@ -158,24 +205,34 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var (
 	addr          string
-	upstreams     string
+	hosts         string
 	balancePolicy string
 )
 
 func init() {
 	flag.StringVar(&addr, "addr", ":80", "")
-	flag.StringVar(&upstreams, "upstreams", "", "")
+	flag.StringVar(&hosts, "upstreams", "", "")
 	flag.StringVar(&balancePolicy, "balance-policy", "random", "load balance policy")
+}
+
+func hostsToUpstreams(hostsStr string) []*Upstream {
+	var upstreams []*Upstream
+	for _, s := range strings.Split(hostsStr, " ") {
+		upstreams = append(upstreams, &Upstream{host: s})
+	}
+	return upstreams
 }
 
 func main() {
 	flag.Parse()
-	if upstreams == "" {
+	if hosts == "" {
 		log.Fatal("upstream is required")
 	}
 
+	upstreams := hostsToUpstreams(hosts)
+
 	handler := &Handler{
-		Upstreams: strings.Split(upstreams, " "),
+		Upstreams: upstreams,
 		Transport: http.DefaultTransport,
 	}
 

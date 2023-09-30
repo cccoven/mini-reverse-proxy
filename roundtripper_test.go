@@ -13,13 +13,13 @@ type LoggingRoundTripper struct {
 }
 
 func (l *LoggingRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
-	log.Println("Sending request to ", r.Host)
+	log.Printf("Sending request to %s\n", r.Host)
 	resp, err := l.Transport.RoundTrip(r)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Println("Got response from ", r.Host)
+	log.Printf("Got response from %s, status=%d\n", r.Host, resp.StatusCode)
 	return resp, nil
 }
 
